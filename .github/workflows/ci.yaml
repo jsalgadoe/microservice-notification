@@ -3,34 +3,108 @@ name: Deploy to Amazon ECS
 on:
   push:
     branches:
-      - main # Puedes cambiar esto a la rama que quieras usar para desplegar
+      - main # Cambia esto a la rama que quieras usar para desplegar
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout del repositorio
-      - name: Checkout
+      # 1. Checkout del código
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # Login en Amazon ECR
+      # 2. Configurar credenciales de AWS
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{secrets.AWS_REGION}}
+          aws-region: ${{ secrets.AWS_REGION }}
 
+      # 3. Login en Amazon ECR
       - name: Login to Amazon ECR
-        id: ecr
-        uses: jwalton/gh-ecr-login@v3
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-      # Construcción y push de la imagen Docker
-      - name: Build, tag, and push Docker image
-        env:
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      # 4. Crear un repositorio ECR si no existe
+      - name: Create ECR Repository (if not exists)
         run: |
-          IMAGE_TAG=latest
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REPOSITORY:$IMAGE_TAG
+          aws ecr describe-repositories --repository-name my-ecr-repo || \
+          aws ecr create-repository --repository-name my-ecr-repo
+
+      # 5. Construcción, etiquetado y push de la imagen Docker a Amazon ECR
+      - name: Build, tag, and push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: my-ecr-repo
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # 6. Crear un clúster de ECS si no existe
+      - name: Create ECS Cluster
+        run: |
+          aws ecs describe-clusters --clusters my-cluster || \
+          aws ecs create-cluster --cluster-name my-cluster
+
+      # 7. Crear una definición de tarea de ECS
+      - name: Create ECS task definition
+        id: create-task-def
+        run: |
+          ecs_task_definition=$(cat <<EOF
+          {
+            "family": "my-task-family",
+            "containerDefinitions": [
+              {
+                "name": "my-container",
+                "image": "${{ steps.build-image.outputs.image }}",
+                "memory": 512,
+                "cpu": 256,
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": 80,
+                    "hostPort": 80
+                  }
+                ],
+                "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "log-microservicios",
+                  "awslogs-region": "us-east-2",
+                  "awslogs-stream-prefix": "ecs"
+                }
+               }
+              }
+            ]
+          }
+          EOF
+          )
+
+          task_arn=$(aws ecs register-task-definition --cli-input-json "$ecs_task_definition" --query "taskDefinition.taskDefinitionArn" --output text)
+          echo "::set-output name=task-definition::$task_arn"
+
+      # 8. Crear el servicio de ECS
+      - name: Create ECS service
+        run: |
+          aws ecs describe-services --cluster my-cluster --services my-service || \
+          aws ecs create-service \
+            --cluster my-cluster \
+            --service-name my-service \
+            --task-definition ${{ steps.create-task-def.outputs.task-definition }} \
+            --desired-count 1 \
+            --launch-type EC2
+
+      # 9. Desplegar la tarea en ECS
+      - name: Deploy ECS service
+        run: |
+          aws ecs update-service \
+            --cluster my-cluster \
+            --service my-service \
+            --task-definition ${{ steps.create-task-def.outputs.task-definition }} \
+            --desired-count 1 \
+            --force-new-deployment
