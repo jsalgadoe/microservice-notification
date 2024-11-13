@@ -97,7 +97,9 @@ jobs:
             --service-name my-service \
             --task-definition ${{ steps.create-task-def.outputs.task-definition }} \
             --desired-count 1 \
-            --launch-type EC2
+            --launch-type FARGATE \
+            --network-configuration
+            "awsvpcConfiguration={subnets=[subnet-07d523e319f45fb1f],securityGroups=[sg-0d74cb39c630b7145],assignPublicIp=ENABLED}"
 
       # 9. Desplegar la tarea en ECS
       - name: Deploy ECS service
