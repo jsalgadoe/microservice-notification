@@ -39,30 +39,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          ECS_CLUSTER_NAME="microservices-test"
-          SERVICE_NAME="microservicios"
-          TASK_FAMILY="microservices-notification"  # El nombre de la familia de la task definition
-          ECR_IMAGE_URI="${{ secrets.ECR_REPOSITORY }}:latest"
+          ECS_CLUSTER_NAME="microservices-cluster"  # Nombre del cluster ECS
+          SERVICE_NAME="microservicios-service"     # Nombre del servicio ECS
+          TASK_FAMILY="microservices-notification" # Nombre de la familia de la task definition
+          TASK_DEF_ARN="arn:aws:ecs:us-east-2:590183984670:task-definition/microservices-notification:2"  # ARN de la task definition registrada
 
           # Obtener la última definición de tarea
-          TASK_DEF=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY | jq '.taskDefinition')
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition $TASK_DEF_ARN)
 
-          # Crear una nueva definición de tarea con la nueva imagen
-          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "$ECR_IMAGE_URI" \
-            '{ 
-              family: .family, 
-              containerDefinitions: (.containerDefinitions | map(.image = $IMAGE)),
-              executionRoleArn: .executionRoleArn,
-              taskRoleArn: .taskRoleArn,
-              networkMode: .networkMode,
-              requiresCompatibilities: .requiresCompatibilities,
-              cpu: .cpu,
-              memory: .memory
-            }'
-          )
+          # Reemplazar la imagen con la nueva imagen en ECR
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "$ECR_REPOSITORY:latest" '.taskDefinition.containerDefinitions[0].image=$IMAGE')
 
-          # Registrar la nueva versión de la definición de tarea
-          NEW_TASK_DEF_ARN=$(echo "$NEW_TASK_DEF" | aws ecs register-task-definition --cli-input-json file://- | jq -r '.taskDefinition.taskDefinitionArn')
+          # Crear una nueva versión de la definición de tarea
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" | jq -r '.taskDefinition.taskDefinitionArn')
 
           # Actualizar el servicio con la nueva versión de la tarea
           aws ecs update-service --cluster $ECS_CLUSTER_NAME --service $SERVICE_NAME --task-definition $NEW_TASK_DEF_ARN
