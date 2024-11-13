@@ -1,0 +1,62 @@
+name: Deploy to Amazon ECS microservicios-
+
+on:
+  push:
+    branches:
+      - main # Puedes cambiar esto a la rama que quieras usar para desplegar
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout del repositorio
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Login en Amazon ECR
+      - name: Log in to Amazon ECR
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.ECR_REPOSITORY }}
+
+      # Construcción y push de la imagen Docker
+      - name: Build, tag, and push Docker image
+        env:
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        run: |
+          IMAGE_TAG=latest
+          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REPOSITORY:$IMAGE_TAG
+
+      # Desplegar en ECS
+      - name: Deploy to Amazon ECS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          ECS_CLUSTER_NAME="microservices-test"
+          SERVICE_NAME="microservicios"
+          TASK_FAMILY="microservices-notification"
+
+          # Obtener la última definición de tarea
+          TASK_DEF=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY)
+
+          # Reemplazar la imagen con la nueva imagen en ECR
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "$ECR_REPOSITORY:latest" '.taskDefinition.containerDefinitions[0].image=$IMAGE')
+
+          # Registrar la nueva definición de tarea
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" | jq -r '.taskDefinition.taskDefinitionArn')
+
+          # Verificar si se registró la nueva tarea correctamente
+          if [ -z "$NEW_TASK_DEF_ARN" ]; then
+            echo "Error al registrar la nueva tarea ECS. Abortando despliegue."
+            exit 1
+          fi
+
+          # Actualizar el servicio con la nueva versión de la tarea
+          aws ecs update-service --cluster $ECS_CLUSTER_NAME --service $SERVICE_NAME --task-definition $NEW_TASK_DEF_ARN
