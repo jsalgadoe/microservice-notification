@@ -30,8 +30,8 @@ jobs:
       # 4. Crear un repositorio ECR si no existe
       - name: Create ECR Repository (if not exists)
         run: |
-          aws ecr describe-repositories --repository-name my-ecr-repo || \
-          aws ecr create-repository --repository-name my-ecr-repo
+          aws ecr describe-repositories --repository-name my-ecr-repo --region ${{ secrets.AWS_REGION }}|| \
+          aws ecr create-repository --repository-name my-ecr-repo --region ${{ secrets.AWS_REGION }}
 
       # 5. Construcción, etiquetado y push de la imagen Docker a Amazon ECR
       - name: Build, tag, and push Docker image
@@ -48,8 +48,8 @@ jobs:
       # 6. Crear un clúster de ECS si no existe
       - name: Create ECS Cluster
         run: |
-          aws ecs describe-clusters --clusters my-cluster || \
-          aws ecs create-cluster --cluster-name my-cluster
+          aws ecs describe-clusters --clusters my-cluster  --region ${{ secrets.AWS_REGION }} || \
+          aws ecs create-cluster --cluster-name my-cluster --region ${{ secrets.AWS_REGION }}
 
       # 7. Crear una definición de tarea de ECS
       - name: Create ECS task definition
