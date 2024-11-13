@@ -29,9 +29,11 @@ jobs:
 
       # 4. Crear un repositorio ECR si no existe
       - name: Create ECR Repository (if not exists)
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          aws ecr describe-repositories --repository-name my-ecr-repo --region ${{ secrets.AWS_REGION }}|| \
-          aws ecr create-repository --repository-name my-ecr-repo --region ${{ secrets.AWS_REGION }}
+          aws ecr describe-repositories --repository-name my-ecr-repo --region $AWS_REGION|| \
+          aws ecr create-repository --repository-name my-ecr-repo --region $AWS_REGION
 
       # 5. Construcción, etiquetado y push de la imagen Docker a Amazon ECR
       - name: Build, tag, and push Docker image
